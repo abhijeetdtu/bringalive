@@ -1,0 +1,9 @@
+.DS_Store
+.metaflow
+.pytest_cache
+__pycache__
+*.wav
+cache/*
+document_db
+.webui_secret_key
+chatterbox

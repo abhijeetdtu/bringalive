@@ -1,0 +1,375 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chatterbox Turbo Server</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous" />
+</head>
+
+<body class="bg-light">
+  <div class="container py-4">
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h1 class="h4 mb-3">TTS Server</h1>
+            <div class="mb-3">
+              <label for="text" class="form-label">Text</label>
+              <textarea id="text" class="form-control"
+                rows="6">Hello world. This will stream after a few chunks.</textarea>
+            </div>
+            <div class="mb-3">
+              <label for="engine" class="form-label">Engine</label>
+              <select id="engine" class="form-select">
+                <option value="chatterbox">chatterbox</option>
+                <option value="kokoro">kokoro</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="voice" class="form-label">Voice (optional wav)</label>
+              <input id="voice" type="file" accept="audio/*" class="form-control" />
+              <div class="form-text" id="voice_file_help">Supported by chatterbox only.</div>
+            </div>
+            <div class="mb-3">
+              <label for="voice_asset" class="form-label">Select a Voice</label>
+              <select id="voice_asset" class="form-select">
+                <option value="">(none)</option>
+              </select>
+              <div class="form-text" id="voice_asset_help">Selecting a voice uses assets in app/assets/voices.</div>
+            </div>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="start_after" class="form-label">Start After N Chunks</label>
+                <input id="start_after" type="number" min="1" value="3" class="form-control" />
+              </div>
+              <div class="col-md-6">
+                <label for="max_chars" class="form-label">Max Chars</label>
+                <input id="max_chars" type="number" min="50" value="350" class="form-control" />
+              </div>
+              <div class="col-md-4">
+                <label for="temperature" class="form-label">Temperature</label>
+                <input id="temperature" type="number" step="0.05" value="0.7" class="form-control" />
+              </div>
+              <div class="col-md-4">
+                <label for="top_p" class="form-label">Top P</label>
+                <input id="top_p" type="number" step="0.01" value="0.92" class="form-control" />
+              </div>
+              <div class="col-md-4">
+                <label for="repetition_penalty" class="form-label">Repetition Penalty</label>
+                <input id="repetition_penalty" type="number" step="0.1" value="1.1" class="form-control" />
+              </div>
+              <div class="col-md-4">
+                <label for="exaggeration" class="form-label">Exaggeration (voice)</label>
+                <input id="exaggeration" type="number" step="0.1" value="0.2" class="form-control" />
+              </div>
+              <div class="col-md-4">
+                <label for="speed" class="form-label">Speed (0.5-2.0)</label>
+                <input id="speed" type="number" step="0.05" value="0.9" class="form-control" />
+              </div>
+              <div class="col-md-8">
+                <label for="source_id" class="form-label">Source ID (for caching)</label>
+                <input id="source_id" type="text" placeholder="e.g. first_love.txt" class="form-control" />
+              </div>
+            </div>
+            <button id="go" class="btn btn-primary mt-3">Start Streaming</button>
+            <div class="mt-3">
+              <div class="progress mb-2" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+                <div id="progress_bar" class="progress-bar" style="width: 0%;">0%</div>
+              </div>
+              <div id="progress_text" class="text-muted small">0 / 0 chunks</div>
+              <div class="d-flex gap-2 my-2">
+                <button id="back_30" class="btn btn-outline-secondary btn-sm" disabled>-30s</button>
+                <button id="forward_30" class="btn btn-outline-secondary btn-sm" disabled>+30s</button>
+              </div>
+              <audio id="player" controls autoplay class="w-100"></audio>
+            </div>
+          </div>
+        </div>
+        <p class="text-muted small mt-2">Streaming starts after N chunks are generated.</p>
+      </div>
+    </div>
+  </div>
+  <script>
+    const btn = document.getElementById("go");
+    const player = document.getElementById("player");
+    const back30 = document.getElementById("back_30");
+    const forward30 = document.getElementById("forward_30");
+    const engineSelect = document.getElementById("engine");
+    const fileInput = document.getElementById("voice");
+    const voiceAssetSelect = document.getElementById("voice_asset");
+    const voiceAssetHelp = document.getElementById("voice_asset_help");
+    const voiceFileHelp = document.getElementById("voice_file_help");
+    const exaggerationInput = document.getElementById("exaggeration");
+    let lastCacheParams = null;
+    let cacheSwapInFlight = false;
+    let running = false;
+
+    const currentEngine = () => (engineSelect.value || "chatterbox").trim().toLowerCase();
+    const engineIsKokoro = () => currentEngine() === "kokoro";
+
+    const seekableRange = () => {
+      if (player.seekable && player.seekable.length > 0) {
+        const end = player.seekable.end(player.seekable.length - 1);
+        const start = player.seekable.start(0);
+        return { start, end };
+      }
+      if (Number.isFinite(player.duration)) {
+        return { start: 0, end: player.duration };
+      }
+      return null;
+    };
+
+    const updateSeekEnabled = () => {
+      const r = seekableRange();
+      const seekable = !!(r && Number.isFinite(r.end) && r.end > 0);
+      const enabled = seekable || !!lastCacheParams;
+      back30.disabled = !enabled;
+      forward30.disabled = !enabled;
+    };
+
+    const setRunning = (isRunning) => {
+      running = isRunning;
+      btn.disabled = isRunning;
+    };
+
+    const setCookie = (name, value, maxAgeSeconds = 3600) => {
+      document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; max-age=${maxAgeSeconds}; path=/; SameSite=Lax`;
+    };
+
+    const getCookie = (name) => {
+      const prefix = `${encodeURIComponent(name)}=`;
+      const parts = document.cookie.split(";").map((c) => c.trim());
+      for (const part of parts) {
+        if (part.startsWith(prefix)) {
+          return decodeURIComponent(part.slice(prefix.length));
+        }
+      }
+      return "";
+    };
+
+    const clampSeek = (value) => {
+      if (Number.isNaN(value)) return 0;
+      const r = seekableRange();
+      if (!r) return 0;
+      return Math.max(r.start, Math.min(r.end, value));
+    };
+
+    const loadCachedAndSwap = async () => {
+      if (!lastCacheParams || cacheSwapInFlight) return false;
+      cacheSwapInFlight = true;
+      try {
+        const cachedRes = await fetch(
+          "/synthesize_cached?" + lastCacheParams.toString());
+        if (!cachedRes.ok) return false;
+        const blob = await cachedRes.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        player.src = blobUrl;
+        await player.play();
+        return true;
+      } catch (e) {
+        return false;
+      } finally {
+        cacheSwapInFlight = false;
+      }
+    };
+
+    const seekBy = async (delta) => {
+      let target = clampSeek(player.currentTime + delta);
+      const r = seekableRange();
+      if (!r || !Number.isFinite(r.end) || r.end <= 0) {
+        const swapped = await loadCachedAndSwap();
+        if (swapped) {
+          target = clampSeek(player.currentTime + delta);
+        } else {
+          return;
+        }
+      }
+      if (player.fastSeek) {
+        player.fastSeek(target);
+      } else {
+        player.currentTime = target;
+      }
+    };
+
+    back30.onclick = () => seekBy(-30);
+    forward30.onclick = () => seekBy(30);
+
+    player.addEventListener("loadedmetadata", updateSeekEnabled);
+    player.addEventListener("durationchange", updateSeekEnabled);
+    player.addEventListener("canplay", updateSeekEnabled);
+
+    // Only one voice source should be active: uploaded file or asset dropdown.
+    voiceAssetSelect.addEventListener("change", () => {
+      if (voiceAssetSelect.value && voiceAssetSelect.value.trim()) {
+        fileInput.value = "";
+      }
+    });
+
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files.length > 0) {
+        voiceAssetSelect.value = "";
+      }
+    });
+
+    const applyEngineUi = () => {
+      const isKokoro = engineIsKokoro();
+      fileInput.disabled = isKokoro;
+      if (isKokoro) {
+        fileInput.value = "";
+        voiceFileHelp.textContent = "Kokoro uses built-in voice IDs from the dropdown.";
+        voiceAssetHelp.textContent = "Kokoro voices are built-in IDs served by the backend.";
+        exaggerationInput.disabled = true;
+      } else {
+        voiceFileHelp.textContent = "Supported by chatterbox only.";
+        voiceAssetHelp.textContent = "Selecting a voice uses assets in app/assets/voices.";
+        exaggerationInput.disabled = false;
+      }
+    };
+
+    btn.onclick = async () => {
+      if (running) return;
+      setRunning(true);
+      const text = document.getElementById("text").value;
+      const engine = currentEngine();
+      const startAfter = document.getElementById("start_after").value;
+      const maxChars = document.getElementById("max_chars").value;
+      const temperature = document.getElementById("temperature").value;
+      const topP = document.getElementById("top_p").value;
+      const rep = document.getElementById("repetition_penalty").value;
+      const exaggeration = document.getElementById("exaggeration").value;
+      const speed = document.getElementById("speed").value;
+      let sourceId = document.getElementById("source_id").value;
+      const voiceAsset = voiceAssetSelect.value;
+      if (!sourceId || !sourceId.trim()) {
+        if (voiceAsset && voiceAsset.trim()) {
+          sourceId = voiceAsset.trim();
+        } else {
+          sourceId = "default";
+        }
+      }
+
+      let voiceId = "";
+      if (!engineIsKokoro() && !voiceAsset && fileInput.files.length > 0) {
+        const fd = new FormData();
+        fd.append("file", fileInput.files[0]);
+        const up = await fetch("/upload_voice", { method: "POST", body: fd });
+        const upJson = await up.json();
+        voiceId = upJson.voice_id;
+      }
+      const fd = new FormData();
+      fd.append("text", text);
+      fd.append("max_chars", maxChars);
+      const progRes = await fetch("/progress_start", { method: "POST", body: fd });
+      const prog = await progRes.json();
+      const jobId = prog.job_id;
+      const total = prog.total;
+      setCookie("job_id", jobId);
+
+      const progressBar = document.getElementById("progress_bar");
+      const progressText = document.getElementById("progress_text");
+      progressBar.style.width = "0%";
+      progressBar.textContent = "0%";
+      progressText.textContent = `0 / ${total} chunks`;
+
+      const params = new URLSearchParams({
+        text,
+        engine,
+        voice_id: voiceId,
+        voice_asset: voiceAsset,
+        start_after_chunks: startAfter,
+        max_chars: maxChars,
+        temperature,
+        top_p: topP,
+        repetition_penalty: rep,
+        exaggeration,
+        speed,
+        job_id: jobId,
+        source_id: sourceId,
+      });
+      lastCacheParams = new URLSearchParams({
+        engine,
+        source_id: sourceId,
+        voice_id: voiceId,
+        voice_asset: voiceAsset,
+        speed,
+      });
+      updateSeekEnabled();
+      const url = "/synthesize_stream?" + params.toString();
+      player.src = url;
+      player.play();
+
+      const poll = async () => {
+        try {
+          let activeJobId = jobId || getCookie("job_id");
+          if (!activeJobId) return;
+          let res = await fetch(`/progress?job_id=${activeJobId}&t=${Date.now()}`);
+          if (res.status === 404 && activeJobId !== jobId) {
+            // Try the current session job_id if cookie is stale.
+            activeJobId = jobId;
+            res = await fetch(`/progress?job_id=${activeJobId}&t=${Date.now()}`);
+          }
+          if (!res.ok) return;
+          const data = await res.json();
+          const done = data.done || 0;
+            const tot = data.total || total || 0;
+          const pct = tot > 0 ? Math.min(100, Math.floor((done / tot) * 100)) : 0;
+          progressBar.style.width = `${pct}%`;
+          progressBar.textContent = `${pct}%`;
+          progressText.textContent = `${done} / ${tot} chunks`;
+          if (done >= tot && tot > 0) {
+            clearInterval(timer);
+            await loadCachedAndSwap();
+            setRunning(false);
+          }
+        } catch (e) {
+          // ignore
+        }
+      };
+      poll();
+      const timer = setInterval(poll, 10000);
+    };
+
+    player.addEventListener("ended", () => setRunning(false));
+
+    const loadVoices = async () => {
+      try {
+        const engine = currentEngine();
+        const res = await fetch(`/voices?engine=${encodeURIComponent(engine)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const select = voiceAssetSelect;
+        select.innerHTML = "";
+        if (engine !== "kokoro") {
+          const noneOpt = document.createElement("option");
+          noneOpt.value = "";
+          noneOpt.textContent = "(none)";
+          select.appendChild(noneOpt);
+        }
+        data.voices.forEach((v) => {
+          const opt = document.createElement("option");
+          opt.value = v;
+          opt.textContent = v;
+          select.appendChild(opt);
+        });
+        if (data.default_voice) {
+          select.value = data.default_voice;
+        } else if (engine === "kokoro" && data.voices.length > 0) {
+          select.value = data.voices[0];
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    engineSelect.addEventListener("change", async () => {
+      applyEngineUi();
+      await loadVoices();
+    });
+    applyEngineUi();
+    loadVoices();
+  </script>
+</body>
+
+</html>

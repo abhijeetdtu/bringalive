@@ -1,0 +1,10 @@
+name: llm2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - chatterbox-mlx
+    - torch
+    - torchaudio

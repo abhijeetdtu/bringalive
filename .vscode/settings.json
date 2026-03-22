@@ -1,0 +1,14 @@
+{
+    "editor.formatOnSave": true,
+    "notebook.output.wordWrap": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.autopep8",
+        "editor.formatOnSave": true
+    },
+    "autopep8.args": [
+        "--max-line-length",
+        "79",
+        "--experimental"
+    ],
+    "python.analysis.autoIndent": true,
+}

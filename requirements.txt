@@ -1,0 +1,7 @@
+chromadb
+pytest
+ollama
+metaflow
+fastapi
+uvicorn
+pyrubberband

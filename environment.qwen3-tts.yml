@@ -1,0 +1,11 @@
+name: qwen3-tts
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - sox
+  - pip:
+      - qwen-tts==0.1.1
+      - soundfile
+      - numpy
