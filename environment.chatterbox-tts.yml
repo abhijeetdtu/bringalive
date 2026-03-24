@@ -1,0 +1,13 @@
+name: chatterbox-tts
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - sox
+  - pip:
+      - torch
+      - torchaudio
+      - chatterbox-tts
+      - soundfile
+      - -r requirements.txt

@@ -87,6 +87,19 @@ def _resolve_dtype(name: str, device_map: str):
     return torch.float32
 
 
+def _configure_torch_for_inference(device_map: str):
+    if "cuda" not in device_map or not torch.cuda.is_available():
+        return
+    # Favor fast matmul kernels during pure inference workloads.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
+    try:
+        torch.set_float32_matmul_precision("high")
+    except RuntimeError:
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--text", type=str, help="Text to synthesize")
@@ -114,6 +127,8 @@ def main():
                     help="Optional attention backend (e.g. flash_attention_2)")
 
     ap.add_argument("--max-chars", type=int, default=350)
+    ap.add_argument("--batch-size", type=int, default=1,
+                    help="Number of text chunks to synthesize per model call")
     ap.add_argument("--chunk-dir", type=Path, default=None,
                     help="Directory to store per-chunk wavs (for resume)")
     ap.add_argument("--resume", action="store_true",
@@ -142,6 +157,7 @@ def main():
     load_kwargs["dtype"] = _resolve_dtype(args.dtype, args.device_map)
     if args.attn_implementation:
         load_kwargs["attn_implementation"] = args.attn_implementation
+    _configure_torch_for_inference(args.device_map)
 
     print(f"Loading model: {args.model}")
     print(f"device_map={args.device_map}, dtype={load_kwargs['dtype']}")
@@ -213,29 +229,48 @@ def main():
         pending_texts.append(chunk)
 
     if pending_texts:
-        print(f"Running batch inference for {len(pending_texts)} chunks")
-        wavs, sample_rate = model.generate_custom_voice(
-            text=pending_texts,
-            speaker=speaker,
-            language=args.language,
-            instruct=args.instruct,
-            non_streaming_mode=True,
-            do_sample=not args.no_sample,
-            top_k=args.top_k,
-            top_p=args.top_p,
-            temperature=args.temperature,
-            repetition_penalty=args.repetition_penalty,
-            max_new_tokens=args.max_new_tokens,
-        )
-        if len(wavs) != len(pending_texts):
-            raise SystemExit(
-                f"Batch output mismatch: got {len(wavs)} wavs for {len(pending_texts)} input chunks")
-        for idx, wav in zip(pending_indices, wavs):
-            tmp_path = temp_paths[idx - 1]
-            chunk_audio = _normalize_audio(wav)
-            if chunk_audio.size == 0:
-                raise SystemExit(f"No audio generated for chunk {idx}")
-            sf.write(tmp_path, chunk_audio, sample_rate, subtype="FLOAT")
+        batch_size = max(1, args.batch_size)
+        print(
+            f"Running inference for {len(pending_texts)} chunks with batch_size={batch_size}")
+        sample_rate = None
+        for start in range(0, len(pending_texts), batch_size):
+            batch_indices = pending_indices[start:start + batch_size]
+            batch_texts = pending_texts[start:start + batch_size]
+            print(
+                f"Generating batch {start // batch_size + 1} "
+                f"({len(batch_texts)} chunk{'s' if len(batch_texts) != 1 else ''})"
+            )
+            with torch.inference_mode():
+                wavs, batch_sample_rate = model.generate_custom_voice(
+                    text=batch_texts,
+                    speaker=speaker,
+                    language=args.language,
+                    instruct=args.instruct,
+                    non_streaming_mode=True,
+                    do_sample=not args.no_sample,
+                    top_k=args.top_k,
+                    top_p=args.top_p,
+                    temperature=args.temperature,
+                    repetition_penalty=args.repetition_penalty,
+                    max_new_tokens=args.max_new_tokens,
+                )
+            if len(wavs) != len(batch_texts):
+                raise SystemExit(
+                    f"Batch output mismatch: got {len(wavs)} wavs for {len(batch_texts)} input chunks")
+            if sample_rate is None:
+                sample_rate = batch_sample_rate
+            elif batch_sample_rate != sample_rate:
+                raise SystemExit(
+                    f"Sample-rate mismatch across batches: {batch_sample_rate} != {sample_rate}")
+            for idx, wav in zip(batch_indices, wavs):
+                tmp_path = temp_paths[idx - 1]
+                chunk_audio = _normalize_audio(wav)
+                if chunk_audio.size == 0:
+                    raise SystemExit(f"No audio generated for chunk {idx}")
+                sf.write(tmp_path, chunk_audio, sample_rate, subtype="FLOAT")
+            del wavs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     if not temp_paths:
         raise SystemExit("No audio generated")
@@ -273,5 +308,23 @@ if __name__ == "__main__":
       --chunk-dir app/cache/short_test/qwen3/1 \
       --resume \
       --out bringalive/documents/short_test_qwen.wav
+
+    Windows PowerShell:
+    conda run --no-capture-output -n qwen3-tts-cuda python -u scripts/qwen3_tts_chunk.py `
+      --device-map "cuda:0" `
+      --attn-implementation "sdpa" `
+      --dtype "float16" `
+      --batch-size 1 `
+      --no-sample `
+      --max-new-tokens 1024 `
+      --text-file "bringalive/documents/long_test.txt" `
+      --speaker "Ryan" `
+      --language "English" `
+      --chunk-dir "app/cache/short_test/qwen3/1" `
+      --resume `
+      --out "bringalive/documents/long_test_qwen.wav"
+    
+    conda run --no-capture-output -n qwen3-tts-experiment python -u scripts/qwen3_tts_chunk.py --device-map "cuda:0" --attn-implementation "flash_attention_2" --dtype "float16" --batch-size 1 --no-sample --max-new-tokens 1024 --text-file "bringalive/documents/short_test.txt" --speaker "Ryan" --language "English" --chunk-dir "app/cache/short_test/qwen3_exp/1" --resume --out "bringalive/documents/short_test_qwen_experiment.wav"
+
     """
     main()

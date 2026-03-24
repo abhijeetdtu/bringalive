@@ -1,0 +1,10 @@
+text_length,instruct_length,text_chars,instruct_chars,repeats,median_wall_seconds,median_audio_seconds,median_rtf,min_rtf,max_rtf,device_map,dtype,attn_implementation,do_sample,model
+short,short,75,34,3,8.4533,4.96,1.7043,1.6652,1.7077,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+short,medium,75,129,3,19.2676,5.36,3.5843,3.5531,3.5947,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+short,long,75,358,3,8.5972,5.12,1.7617,1.5785,3.4079,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+medium,short,228,34,3,28.2845,14.96,1.8039,1.73,2.1659,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+medium,medium,228,129,3,31.7448,15.36,2.0111,1.9412,2.1449,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+medium,long,228,358,3,31.6452,16.08,1.9582,1.8744,1.9768,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+long,short,589,34,3,149.5541,41.84,3.5858,3.5744,3.5868,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+long,medium,589,129,3,133.3916,37.6,3.5705,3.5476,3.5791,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign
+long,long,589,358,3,136.3274,37.76,3.6027,3.5977,3.6104,cuda:0,torch.bfloat16,sdpa,False,Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign

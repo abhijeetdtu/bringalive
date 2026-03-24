@@ -2,9 +2,11 @@
 import argparse
 import gc
 import re
+import shutil
 import time
 from pathlib import Path
 
+import perth
 import torch
 import soundfile as sf
 import tempfile
@@ -14,6 +16,15 @@ from chatterbox.tts_turbo import ChatterboxTurboTTS, S3GEN_SR
 
 SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 logger = logging.getLogger("scripts.chatterbox_turbo_chunk")
+
+
+def _patch_perth_watermarker():
+    watermarker_cls = getattr(perth, "PerthImplicitWatermarker", None)
+    if watermarker_cls is None:
+        logger.warning(
+            "PerthImplicitWatermarker is unavailable; falling back to DummyWatermarker."
+        )
+        perth.PerthImplicitWatermarker = perth.DummyWatermarker
 
 
 def split_sentences(text: str):
@@ -60,7 +71,7 @@ def main():
     ap.add_argument("--text", type=str, help="Text to synthesize")
     ap.add_argument("--text-file", type=Path, help="Path to text file")
     ap.add_argument("--out", type=Path, default=Path("turbo_out.wav"))
-    ap.add_argument("--device", type=str, default=None, help="mps or cpu")
+    ap.add_argument("--device", type=str, default=None, help="cuda, mps, or cpu")
     ap.add_argument("--max-chars", type=int, default=350)
     ap.add_argument("--voice", type=Path, default=None,
                     help="Optional reference wav")
@@ -91,11 +102,17 @@ def main():
 
     device = args.device
     if device is None:
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
 
     logger.info("Config: %s", vars(args))
     logger.info("Device: %s", device)
 
+    _patch_perth_watermarker()
     model = ChatterboxTurboTTS.from_pretrained(device=device)
 
     if args.voice:
@@ -108,9 +125,11 @@ def main():
 
     temp_paths = []
     tmp_dir = None
+    cleanup_chunk_root = False
     if args.chunk_dir is not None:
         chunk_root = args.chunk_dir
         chunk_root.mkdir(parents=True, exist_ok=True)
+        cleanup_chunk_root = True
     else:
         tmp_dir = tempfile.TemporaryDirectory(prefix="chatterbox_turbo_")
         chunk_root = Path(tmp_dir.name)
@@ -124,8 +143,9 @@ def main():
             continue
 
         print(f"[{i}/{len(chunks)}] {len(chunk)} chars")
+        autocast_enabled = device in {"cuda", "mps"}
         with torch.inference_mode():
-            with torch.autocast(device_type=device, dtype=torch.float16):
+            with torch.autocast(device_type=device, dtype=torch.float16, enabled=autocast_enabled):
                 wav = model.generate(
                     chunk,
                     temperature=args.temperature,
@@ -159,8 +179,11 @@ def main():
                         break
                     out_f.write(data)
 
-    if tmp_dir is not None and not args.keep_chunks:
-        tmp_dir.cleanup()
+    if not args.keep_chunks:
+        if tmp_dir is not None:
+            tmp_dir.cleanup()
+        elif cleanup_chunk_root:
+            shutil.rmtree(chunk_root, ignore_errors=True)
     print(f"Saved: {args.out}")
 
 
@@ -180,6 +203,18 @@ if __name__ == "__main__":
         --resume \
         --out bringalive/documents/newport.wav
 
+    Windows PowerShell (CUDA):
+    conda run --no-capture-output -n chatterbox-tts python -m scripts.chatterbox_turbo_chunk `
+        --device cuda `
+        --voice "bringalive\documents\short_test_qwen_experiment.wav" `
+        --text-file "bringalive/documents/short_test.txt" `
+        --chunk-dir "app/cache/short_test/chatterbox/1" `
+         --exaggeration 0.2 `
+        --temperature 0.7 `
+        --top-p 0.92 `
+        --repetition-penalty 1.1 `
+        --resume `
+        --out "bringalive/documents/short_test_chatterbox_clone_qwen.wav"
 
     """
     main()

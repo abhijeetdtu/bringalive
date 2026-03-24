@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chunk Reader</title>
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: rgba(255, 250, 243, 0.92);
+      --panel-strong: #fff8ee;
+      --ink: #1e1b18;
+      --muted: #655a4f;
+      --accent: #b4542d;
+      --accent-soft: rgba(180, 84, 45, 0.14);
+      --line: rgba(30, 27, 24, 0.12);
+      --shadow: 0 18px 60px rgba(74, 48, 29, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(255, 227, 194, 0.7), transparent 35%),
+        radial-gradient(circle at top right, rgba(205, 226, 255, 0.45), transparent 30%),
+        linear-gradient(180deg, #f8f3ea 0%, var(--bg) 100%);
+    }
+
+    .shell {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 24px auto;
+      padding: 24px;
+      border-radius: 28px;
+      background: rgba(255, 252, 247, 0.72);
+      backdrop-filter: blur(18px);
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-end;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.5rem);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+      font-weight: 600;
+    }
+
+    .hero p {
+      max-width: 560px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--muted);
+      border: 1px solid var(--line);
+      font-size: 0.92rem;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 6px var(--accent-soft);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 20px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 18px;
+    }
+
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    input,
+    textarea,
+    button {
+      font: inherit;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    input[type="password"],
+    textarea {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+      color: var(--ink);
+      padding: 12px 14px;
+      outline: none;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: rgba(180, 84, 45, 0.55);
+      transform: translateY(-1px);
+    }
+
+    input[type="file"] {
+      width: 100%;
+      color: var(--muted);
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: none;
+      border-radius: 999px;
+      padding: 12px 18px;
+      cursor: pointer;
+      transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+      transform: none;
+    }
+
+    .primary {
+      background: var(--accent);
+      color: #fff7f1;
+    }
+
+    .secondary {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .ghost {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--ink);
+    }
+
+    .reader {
+      display: grid;
+      gap: 18px;
+    }
+
+    .transport {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .transport .buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .transport button {
+      min-width: 58px;
+    }
+
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .scrubber {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .chunk-card,
+    .summary-card {
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255, 253, 250, 0.95), rgba(250, 245, 236, 0.95));
+      min-height: 270px;
+      padding: 20px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    }
+
+    .chunk-card {
+      font-size: 1.12rem;
+      line-height: 1.8;
+      overflow-y: auto;
+      max-height: 46vh;
+      white-space: pre-wrap;
+    }
+
+    .summary-card {
+      color: var(--muted);
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    .status {
+      min-height: 24px;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    @media (max-width: 960px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <h1>Chunk Reader</h1>
+        <p>Load a `.txt` document, move through it like a transport deck, and send the active chunk to Open WebUI for a quick summary.</p>
+      </div>
+      <div class="badge"><span class="dot"></span><span id="connectionLabel">Waiting for document</span></div>
+    </section>
+
+    <section class="grid">
+      <aside class="panel">
+        <h2>Document</h2>
+        <div class="stack">
+          <label>
+            Upload text file
+            <input id="fileInput" type="file" accept=".txt,.md,.text,text/plain" />
+          </label>
+          <label>
+            Or load from local path
+            <input id="pathInput" type="text" placeholder="bringalive/documents/short_test.txt" />
+          </label>
+          <div class="row">
+            <label>
+              Chunk size
+              <input id="chunkSizeInput" type="number" min="100" max="10000" step="50" value="900" />
+            </label>
+            <label>
+              Auto-summarize
+              <input id="autoSummarizeInput" type="number" min="0" max="1" step="1" value="1" />
+            </label>
+          </div>
+          <div class="actions">
+            <button id="uploadBtn" class="primary">Load Upload</button>
+            <button id="pathBtn" class="secondary">Load Path</button>
+          </div>
+        </div>
+
+        <h2 style="margin-top: 24px;">Open WebUI</h2>
+        <div class="stack">
+          <label>
+            Base URL
+            <input id="baseUrlInput" type="text" value="http://localhost:3000" />
+          </label>
+          <label>
+            Model
+            <input id="modelInput" type="text" placeholder="llama3.1:8b or your Open WebUI model id" />
+          </label>
+          <label>
+            API key
+            <input id="apiKeyInput" type="password" placeholder="Optional if your Open WebUI instance requires auth" />
+          </label>
+          <label>
+            Summary prompt
+            <textarea id="promptInput">Summarize this document chunk in 3 concise bullet points. Preserve key names, claims, and chronology when present.</textarea>
+          </label>
+          <div class="actions">
+            <button id="summarizeBtn" class="primary" disabled>Summarize Chunk</button>
+          </div>
+        </div>
+      </aside>
+
+      <section class="reader">
+        <div class="panel">
+          <div class="transport">
+            <div class="buttons">
+              <button id="firstBtn" class="ghost" disabled>|&lt;</button>
+              <button id="prevBtn" class="ghost" disabled>&lt;</button>
+              <button id="nextBtn" class="ghost" disabled>&gt;</button>
+              <button id="lastBtn" class="ghost" disabled>&gt;|</button>
+            </div>
+            <div class="meta">
+              <span id="docName">No document loaded</span>
+              <span id="chunkCounter">Chunk 0 / 0</span>
+            </div>
+          </div>
+          <input id="scrubber" class="scrubber" type="range" min="0" max="0" value="0" disabled />
+        </div>
+
+        <div class="panel">
+          <h2>Current Chunk</h2>
+          <div id="chunkCard" class="chunk-card">Load a document to begin.</div>
+        </div>
+
+        <div class="panel">
+          <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+            <h2 style="margin:0;">Summary</h2>
+            <div id="statusText" class="status"></div>
+          </div>
+          <div id="summaryCard" class="summary-card">The chunk summary will appear here.</div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      documentId: "",
+      documentName: "",
+      chunkCount: 0,
+      currentChunk: 0,
+      currentChunkText: "",
+      summaryCache: new Map(),
+      loading: false,
+    };
+
+    const els = {
+      fileInput: document.getElementById("fileInput"),
+      pathInput: document.getElementById("pathInput"),
+      chunkSizeInput: document.getElementById("chunkSizeInput"),
+      autoSummarizeInput: document.getElementById("autoSummarizeInput"),
+      uploadBtn: document.getElementById("uploadBtn"),
+      pathBtn: document.getElementById("pathBtn"),
+      baseUrlInput: document.getElementById("baseUrlInput"),
+      modelInput: document.getElementById("modelInput"),
+      apiKeyInput: document.getElementById("apiKeyInput"),
+      promptInput: document.getElementById("promptInput"),
+      summarizeBtn: document.getElementById("summarizeBtn"),
+      firstBtn: document.getElementById("firstBtn"),
+      prevBtn: document.getElementById("prevBtn"),
+      nextBtn: document.getElementById("nextBtn"),
+      lastBtn: document.getElementById("lastBtn"),
+      scrubber: document.getElementById("scrubber"),
+      chunkCard: document.getElementById("chunkCard"),
+      summaryCard: document.getElementById("summaryCard"),
+      docName: document.getElementById("docName"),
+      chunkCounter: document.getElementById("chunkCounter"),
+      statusText: document.getElementById("statusText"),
+      connectionLabel: document.getElementById("connectionLabel"),
+    };
+
+    const setStatus = (text) => {
+      els.statusText.textContent = text;
+    };
+
+    const autoSummarizeEnabled = () => Number(els.autoSummarizeInput.value || 0) === 1;
+
+    const setNavigationEnabled = (enabled) => {
+      els.firstBtn.disabled = !enabled || state.currentChunk <= 0;
+      els.prevBtn.disabled = !enabled || state.currentChunk <= 0;
+      els.nextBtn.disabled = !enabled || state.currentChunk >= state.chunkCount - 1;
+      els.lastBtn.disabled = !enabled || state.currentChunk >= state.chunkCount - 1;
+      els.scrubber.disabled = !enabled;
+      els.summarizeBtn.disabled = !enabled;
+    };
+
+    const updateMeta = () => {
+      els.docName.textContent = state.documentName || "No document loaded";
+      const total = state.chunkCount || 0;
+      const current = total ? state.currentChunk + 1 : 0;
+      els.chunkCounter.textContent = `Chunk ${current} / ${total}`;
+      els.scrubber.max = Math.max(0, total - 1);
+      els.scrubber.value = total ? state.currentChunk : 0;
+      setNavigationEnabled(Boolean(state.documentId));
+    };
+
+    const summarizeCurrentChunk = async () => {
+      if (!state.documentId) return;
+      const model = els.modelInput.value.trim();
+      if (!model) {
+        setStatus("Add an Open WebUI model before requesting summaries.");
+        return;
+      }
+
+      const cacheKey = `${state.documentId}:${state.currentChunk}`;
+      if (state.summaryCache.has(cacheKey)) {
+        els.summaryCard.textContent = state.summaryCache.get(cacheKey);
+        setStatus("Showing cached summary.");
+        return;
+      }
+
+      setStatus("Summarizing current chunk...");
+      els.summaryCard.textContent = "Waiting for Open WebUI...";
+      try {
+        const response = await fetch(`/api/documents/${state.documentId}/summaries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chunk_index: state.currentChunk,
+            base_url: els.baseUrlInput.value.trim(),
+            model,
+            api_key: els.apiKeyInput.value.trim() || null,
+            system_prompt: els.promptInput.value.trim(),
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || "summary request failed");
+        }
+        state.summaryCache.set(cacheKey, data.summary);
+        els.summaryCard.textContent = data.summary;
+        setStatus("Summary ready.");
+      } catch (error) {
+        els.summaryCard.textContent = "Summary failed.";
+        setStatus(error.message || "Unable to summarize the current chunk.");
+      }
+    };
+
+    const loadChunk = async (index) => {
+      if (!state.documentId || index < 0 || index >= state.chunkCount) return;
+      setStatus("Loading chunk...");
+      try {
+        const response = await fetch(`/api/documents/${state.documentId}/chunks/${index}`);
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.detail || "chunk load failed");
+        }
+        state.currentChunk = data.chunk_index;
+        state.currentChunkText = data.chunk;
+        els.chunkCard.textContent = data.chunk;
+        els.summaryCard.textContent = "The chunk summary will appear here.";
+        updateMeta();
+        setStatus("Chunk loaded.");
+        if (autoSummarizeEnabled()) {
+          await summarizeCurrentChunk();
+        }
+      } catch (error) {
+        setStatus(error.message || "Unable to load the requested chunk.");
+      }
+    };
+
+    const registerDocument = async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "document load failed");
+      }
+      state.documentId = data.document_id;
+      state.documentName = data.name;
+      state.chunkCount = data.chunk_count;
+      state.currentChunk = 0;
+      state.summaryCache = new Map();
+      els.connectionLabel.textContent = `${data.name} loaded`;
+      updateMeta();
+      await loadChunk(0);
+    };
+
+    els.uploadBtn.addEventListener("click", async () => {
+      const file = els.fileInput.files[0];
+      if (!file) {
+        setStatus("Choose a text file first.");
+        return;
+      }
+      setStatus("Uploading document...");
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("chunk_size", els.chunkSizeInput.value);
+      try {
+        const response = await fetch("/api/documents/upload", { method: "POST", body: formData });
+        await registerDocument(response);
+      } catch (error) {
+        setStatus(error.message || "Upload failed.");
+      }
+    });
+
+    els.pathBtn.addEventListener("click", async () => {
+      const path = els.pathInput.value.trim();
+      if (!path) {
+        setStatus("Enter a local path first.");
+        return;
+      }
+      setStatus("Loading document from path...");
+      const formData = new FormData();
+      formData.append("path", path);
+      formData.append("chunk_size", els.chunkSizeInput.value);
+      try {
+        const response = await fetch("/api/documents/path", { method: "POST", body: formData });
+        await registerDocument(response);
+      } catch (error) {
+        setStatus(error.message || "Path load failed.");
+      }
+    });
+
+    els.summarizeBtn.addEventListener("click", summarizeCurrentChunk);
+    els.firstBtn.addEventListener("click", () => loadChunk(0));
+    els.prevBtn.addEventListener("click", () => loadChunk(state.currentChunk - 1));
+    els.nextBtn.addEventListener("click", () => loadChunk(state.currentChunk + 1));
+    els.lastBtn.addEventListener("click", () => loadChunk(state.chunkCount - 1));
+    els.scrubber.addEventListener("input", (event) => loadChunk(Number(event.target.value)));
+
+    document.addEventListener("keydown", (event) => {
+      if (!state.documentId) return;
+      if (event.key === "ArrowLeft") {
+        loadChunk(state.currentChunk - 1);
+      }
+      if (event.key === "ArrowRight") {
+        loadChunk(state.currentChunk + 1);
+      }
+    });
+
+    updateMeta();
+  </script>
+</body>
+
+</html>

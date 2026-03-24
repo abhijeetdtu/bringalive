@@ -1,0 +1,8 @@
+name: qwen3-tts-experiment
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - git
+  - sox
