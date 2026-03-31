@@ -1,0 +1,98 @@
+Convert the text into a compact bullet summary without losing any explicit information, and place a full stop after every sentence so the output works cleanly with TTS.
+
+Core rule:
+- Compression is allowed.
+- Omission is not allowed.
+
+Goal:
+- Make the text shorter and easier to scan.
+- Preserve every explicit fact needed to reconstruct the original meaning.
+- Ensure punctuation supports natural speech rhythm for text-to-speech.
+
+Write as:
+- compact bullets.
+- information-dense bullets.
+- one bullet per atomic fact or tightly linked fact group.
+- sub-bullets when needed to preserve detail, causality, sequence, or explanation.
+
+Preserve explicitly:
+- full names of people, places, organizations, institutions, works, objects, vehicles, and locations.
+- dates, years, times, eras, and numbers.
+- who did what.
+- what exactly happened.
+- what physically happened, if stated.
+- causes, mechanisms, and means.
+- sequence and chronology.
+- consequences and outcomes.
+- quoted statements and key phrases.
+- qualifiers, conditions, limitations, contrast, and uncertainty.
+- relationships between people, places, events, and ideas.
+
+Critical rules:
+1. Do not omit any explicit fact.
+2. Do not replace a specific event with a more general label.
+3. Do not replace a stated mechanism with a vague category.
+4. Do not merge separate facts if that makes any part less specific.
+5. Do not flatten scenes, events, or claims into note-like tags such as "incident," "issue," "development," or "critique" unless the source itself uses them that way.
+6. Do not invent facts, links, or interpretation.
+7. Do not generalize beyond the source.
+8. Keep concrete nouns and verbs from the source where possible.
+9. If one sentence contains multiple explicit details, split them into separate bullets or sub-bullets rather than dropping any.
+10. Prefer one extra bullet over one over-compressed bullet.
+
+Rules for names, abbreviations, and shorthand:
+11. On first mention, always use the full name exactly as given in the source.
+12. Never use a short form, acronym, or initialism on first mention unless the full form appears in the same bullet.
+13. After first mention, shorthand may be used only if it is unambiguous.
+14. Do not use pronouns or shortened references if the reader may not know what they refer to.
+15. Each bullet should remain understandable on its own.
+
+Rules for event fidelity:
+16. If the source states what physically happened, preserve that exact action.
+17. Do not replace "the coach toppled over" with "a coach accident" or any broader phrase.
+18. If the source gives both result and mechanism, preserve both.
+19. Keep causality explicit when the source makes it explicit.
+20. Keep chronology explicit when the order matters.
+
+Rules for punctuation and TTS readability:
+21. Use correct punctuation throughout.
+22. Put a full stop after every sentence.
+23. End every bullet with a full stop.
+24. End every sub-bullet with a full stop.
+25. If a bullet contains more than one sentence, each sentence must end with a full stop.
+26. Write each bullet as natural spoken language, not broken telegraphic fragments.
+27. Use commas, colons, and semicolons only when they improve clarity and TTS pauses.
+28. Avoid excessive dashes, slashes, stacked parentheses, or cryptic abbreviations that sound unnatural in speech.
+29. If a bullet contains a cause, contrast, apposition, or sequence, punctuate it so TTS pauses correctly.
+30. Prefer full words over symbolic shorthand when symbols may sound awkward in speech.
+31. Expand ambiguous shorthand if it would hurt spoken clarity.
+32. Keep quoted material punctuated correctly.
+33. If a bullet has sub-bullets, make each sub-bullet independently readable in speech.
+34. Do not produce notes that sound incomplete when read aloud.
+
+Style:
+- crisp.
+- compact.
+- readable.
+- faithful.
+- TTS-friendly.
+- shorthand is allowed only when it preserves full meaning and still sounds natural when spoken.
+
+Method:
+- Decompose each sentence into all explicit facts.
+- Preserve each fact in a bullet or sub-bullet.
+- Rephrase only enough to add punctuation, clarity, and natural TTS flow.
+- Re-read the summary mentally as spoken audio before finalizing.
+
+Final check before answering:
+- Did I replace any specific event with a broader category?
+- Did I drop any mechanism, object, or causal step?
+- Did I introduce any unexplained short form?
+- Did I omit any name, place, date, number, quote, qualifier, or consequence?
+- Would a new reader understand each bullet without seeing the source?
+- Would each bullet sound natural if read by a TTS engine?
+- Does every sentence end with a full stop?
+
+If any answer is yes, fix it before output.
+
+Output only the bullet summary.

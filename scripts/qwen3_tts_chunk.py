@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import re
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -9,95 +7,18 @@ import soundfile as sf
 import torch
 
 from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
-
-SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
-
-
-def split_sentences(text: str):
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text:
-        return []
-    parts = SENT_SPLIT_RE.split(text)
-    return parts if parts else [text]
-
-
-def pack_sentences(sentences, limit):
-    chunks = []
-    buf = ""
-    for s in sentences:
-        s = s.strip()
-        if not s:
-            continue
-        if not buf:
-            if len(s) <= limit:
-                buf = s
-            else:
-                for i in range(0, len(s), limit):
-                    chunks.append(s[i: i + limit])
-        else:
-            candidate = f"{buf} {s}"
-            if len(candidate) <= limit:
-                buf = candidate
-            else:
-                chunks.append(buf)
-                if len(s) <= limit:
-                    buf = s
-                else:
-                    for i in range(0, len(s), limit):
-                        chunks.append(s[i: i + limit])
-                    buf = ""
-    if buf:
-        chunks.append(buf)
-    return chunks
-
-
-def _safe_cache_name(value: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
-    safe = safe.strip("._-")
-    return safe or "input_text"
-
-
-def _read_text_with_fallback(path: Path, encoding: str | None) -> str:
-    if encoding:
-        return path.read_text(encoding=encoding)
-    for enc in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
-        try:
-            return path.read_text(encoding=enc)
-        except UnicodeDecodeError:
-            continue
-    return path.read_text(encoding="utf-8", errors="replace")
-
-
-def _normalize_audio(wav):
-    audio = np.asarray(wav, dtype="float32").reshape(-1)
-    if audio.size == 0:
-        return np.zeros(0, dtype="float32")
-    return audio
-
-
-def _resolve_dtype(name: str, device_map: str):
-    if name == "float32":
-        return torch.float32
-    if name == "float16":
-        return torch.float16
-    if name == "bfloat16":
-        return torch.bfloat16
-    if "cuda" in device_map and torch.cuda.is_available():
-        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-    return torch.float32
-
-
-def _configure_torch_for_inference(device_map: str):
-    if "cuda" not in device_map or not torch.cuda.is_available():
-        return
-    # Favor fast matmul kernels during pure inference workloads.
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    torch.backends.cudnn.benchmark = True
-    try:
-        torch.set_float32_matmul_precision("high")
-    except RuntimeError:
-        pass
+from scripts.qwen_tts_helpers import (
+    load_qwen_model,
+    normalize_audio,
+    resolve_supported_value,
+)
+from scripts.tts_helpers import (
+    chunk_text,
+    cleanup_chunk_dir,
+    read_text_with_fallback,
+    safe_cache_name,
+    stitch_wav_files,
+)
 
 
 def main():
@@ -153,16 +74,15 @@ def main():
     if not args.list_speakers and not args.list_languages and not args.text and not args.text_file:
         ap.error("Provide --text or --text-file")
 
-    load_kwargs = {"device_map": args.device_map}
-    load_kwargs["dtype"] = _resolve_dtype(args.dtype, args.device_map)
-    if args.attn_implementation:
-        load_kwargs["attn_implementation"] = args.attn_implementation
-    _configure_torch_for_inference(args.device_map)
-
-    print(f"Loading model: {args.model}")
-    print(f"device_map={args.device_map}, dtype={load_kwargs['dtype']}")
     try:
-        model = Qwen3TTSModel.from_pretrained(args.model, **load_kwargs)
+        model, _ = load_qwen_model(
+            model_name=args.model,
+            device_map=args.device_map,
+            dtype_name=args.dtype,
+            attn_implementation=args.attn_implementation,
+            torch_module=torch,
+            qwen_model_cls=Qwen3TTSModel,
+        )
     except OSError as exc:
         raise SystemExit(
             "Failed to load model.\n"
@@ -179,6 +99,8 @@ def main():
         print("\n".join(langs))
         if not args.list_speakers:
             return
+    else:
+        langs = model.get_supported_languages()
 
     speakers = model.get_supported_speakers()
     if args.list_speakers:
@@ -186,23 +108,28 @@ def main():
         if not args.text and not args.text_file:
             return
 
-    speaker = args.speaker
-    if speaker is None:
-        if not speakers:
-            raise SystemExit(
-                "Model did not return any supported speakers; pass --speaker explicitly.")
-        speaker = speakers[0]
+    speaker = resolve_supported_value(
+        requested_value=args.speaker,
+        supported_values=speakers,
+        label="speaker",
+        default_to_first=True,
+    )
+    language = resolve_supported_value(
+        requested_value=args.language,
+        supported_values=langs,
+        label="language",
+        default_to_first=False,
+    )
     print(f"Using speaker: {speaker}")
-    print(f"Using language: {args.language}")
+    print(f"Using language: {language}")
 
-    text = _read_text_with_fallback(
+    text = read_text_with_fallback(
         args.text_file, args.text_encoding) if args.text_file else args.text
     text = (text or "").strip()
     if not text:
         raise SystemExit("Empty text")
 
-    sentences = split_sentences(text)
-    chunks = pack_sentences(sentences, args.max_chars)
+    chunks = chunk_text(text, args.max_chars)
     if not chunks:
         raise SystemExit("No chunks to synthesize")
 
@@ -211,7 +138,7 @@ def main():
         chunk_root = args.chunk_dir
     else:
         base_name = args.text_file.stem if args.text_file else "input_text"
-        chunk_root = Path("app/cache") / _safe_cache_name(base_name)
+        chunk_root = Path("app/cache") / safe_cache_name(base_name)
     chunk_root.mkdir(parents=True, exist_ok=True)
 
     total = len(chunks)
@@ -244,7 +171,7 @@ def main():
                 wavs, batch_sample_rate = model.generate_custom_voice(
                     text=batch_texts,
                     speaker=speaker,
-                    language=args.language,
+                    language=language,
                     instruct=args.instruct,
                     non_streaming_mode=True,
                     do_sample=not args.no_sample,
@@ -264,7 +191,7 @@ def main():
                     f"Sample-rate mismatch across batches: {batch_sample_rate} != {sample_rate}")
             for idx, wav in zip(batch_indices, wavs):
                 tmp_path = temp_paths[idx - 1]
-                chunk_audio = _normalize_audio(wav)
+                chunk_audio = normalize_audio(wav, np)
                 if chunk_audio.size == 0:
                     raise SystemExit(f"No audio generated for chunk {idx}")
                 sf.write(tmp_path, chunk_audio, sample_rate, subtype="FLOAT")
@@ -272,27 +199,8 @@ def main():
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    if not temp_paths:
-        raise SystemExit("No audio generated")
-
-    first_sr = None
-    with sf.SoundFile(temp_paths[0], mode="r") as first_f:
-        first_sr = first_f.samplerate
-
-    with sf.SoundFile(args.out, mode="w", samplerate=first_sr, channels=1, subtype="PCM_16") as out_f:
-        for p in temp_paths:
-            with sf.SoundFile(p, mode="r") as in_f:
-                if in_f.samplerate != first_sr:
-                    raise SystemExit(
-                        f"Sample-rate mismatch in {p}: {in_f.samplerate} != {first_sr}")
-                while True:
-                    data = in_f.read(8192, dtype="float32")
-                    if len(data) == 0:
-                        break
-                    out_f.write(data)
-
-    if auto_chunk_dir and not args.keep_chunks:
-        shutil.rmtree(chunk_root, ignore_errors=True)
+    stitch_wav_files(temp_paths, args.out, subtype="PCM_16")
+    cleanup_chunk_dir(chunk_root, auto_chunk_dir, args.keep_chunks)
 
     print(f"Saved: {args.out}")
 
@@ -310,21 +218,21 @@ if __name__ == "__main__":
       --out bringalive/documents/short_test_qwen.wav
 
     Windows PowerShell:
-    conda run --no-capture-output -n qwen3-tts-cuda python -u scripts/qwen3_tts_chunk.py `
+    conda run --no-capture-output -n qwen3-tts-cuda python -m scripts.qwen3_tts_chunk `
       --device-map "cuda:0" `
-      --attn-implementation "sdpa" `
-      --dtype "float16" `
-      --batch-size 1 `
-      --no-sample `
-      --max-new-tokens 1024 `
-      --text-file "bringalive/documents/long_test.txt" `
+      --dtype "bfloat16" `
+      --batch-size 16 `
+      --max-chars 350 `
+      --max-new-tokens 500 `
+      --text-file bringalive\documents\Ramachandra-Guha-Gandhi-Before-India-_2012_-Viking-_India__-libgen.li.txt `
       --speaker "Ryan" `
       --language "English" `
-      --chunk-dir "app/cache/short_test/qwen3/1" `
+      --chunk-dir "app/cache/gandhi_before_india/qwen3/1" `
+      --out "bringalive/documents/gandhi_before_india.wav" `
       --resume `
-      --out "bringalive/documents/long_test_qwen.wav"
     
-    conda run --no-capture-output -n qwen3-tts-experiment python -u scripts/qwen3_tts_chunk.py --device-map "cuda:0" --attn-implementation "flash_attention_2" --dtype "float16" --batch-size 1 --no-sample --max-new-tokens 1024 --text-file "bringalive/documents/short_test.txt" --speaker "Ryan" --language "English" --chunk-dir "app/cache/short_test/qwen3_exp/1" --resume --out "bringalive/documents/short_test_qwen_experiment.wav"
+    Stable starting point:
+    conda run --no-capture-output -n qwen3-tts-cuda python -u scripts/qwen3_tts_chunk.py --device-map "cuda:0" --dtype "bfloat16" --batch-size 1 --max-new-tokens 256 --text-file "bringalive/documents/short_test.txt" --speaker "Ryan" --language "English" --chunk-dir "app/cache/short_test/qwen3_exp/1" --resume --out "bringalive/documents/short_test_qwen_experiment.wav"
 
     """
     main()

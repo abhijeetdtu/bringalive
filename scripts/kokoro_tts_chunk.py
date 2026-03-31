@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import math
-import re
 from pathlib import Path
 
 import numpy as np
@@ -10,47 +9,12 @@ import torch
 from soundfile import LibsndfileError
 
 from kokoro import KPipeline
-
-SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+from scripts.tts_helpers import (
+    chunk_text,
+    read_text_with_fallback,
+    safe_cache_name,
+)
 DEFAULT_SAMPLE_RATE = 24000
-
-
-def split_sentences(text: str):
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text:
-        return []
-    parts = SENT_SPLIT_RE.split(text)
-    return parts if parts else [text]
-
-
-def pack_sentences(sentences, limit):
-    chunks = []
-    buf = ""
-    for s in sentences:
-        s = s.strip()
-        if not s:
-            continue
-        if not buf:
-            if len(s) <= limit:
-                buf = s
-            else:
-                for i in range(0, len(s), limit):
-                    chunks.append(s[i: i + limit])
-        else:
-            candidate = f"{buf} {s}"
-            if len(candidate) <= limit:
-                buf = candidate
-            else:
-                chunks.append(buf)
-                if len(s) <= limit:
-                    buf = s
-                else:
-                    for i in range(0, len(s), limit):
-                        chunks.append(s[i: i + limit])
-                    buf = ""
-    if buf:
-        chunks.append(buf)
-    return chunks
 
 
 def _to_audio_np(result) -> np.ndarray:
@@ -63,12 +27,6 @@ def _to_audio_np(result) -> np.ndarray:
     return audio
 
 
-def _safe_cache_name(value: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
-    safe = safe.strip("._-")
-    return safe or "input_text"
-
-
 def _bytes_per_sample(subtype: str) -> int:
     mapping = {
         "PCM_U8": 1,
@@ -79,18 +37,6 @@ def _bytes_per_sample(subtype: str) -> int:
         "DOUBLE": 8,
     }
     return mapping.get(subtype.upper(), 2)
-
-
-def _read_text_with_fallback(path: Path, encoding: str | None) -> str:
-    if encoding:
-        return path.read_text(encoding=encoding)
-    for enc in ("utf-8", "utf-8-sig", "cp1252", "latin-1"):
-        try:
-            return path.read_text(encoding=enc)
-        except UnicodeDecodeError:
-            continue
-    # Last resort: preserve progress by replacing bad bytes.
-    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _part_path(base_out: Path, part_idx: int) -> Path:
@@ -160,14 +106,13 @@ def main():
     if not args.text and not args.text_file:
         ap.error("Provide --text or --text-file")
 
-    text = _read_text_with_fallback(
+    text = read_text_with_fallback(
         args.text_file, args.text_encoding) if args.text_file else args.text
     text = (text or "").strip()
     if not text:
         raise SystemExit("Empty text")
 
-    sentences = split_sentences(text)
-    chunks = pack_sentences(sentences, args.max_chars)
+    chunks = chunk_text(text, args.max_chars)
     if not chunks:
         raise SystemExit("No chunks to synthesize")
 
@@ -210,7 +155,7 @@ def main():
         chunk_root = args.chunk_dir
     else:
         base_name = args.text_file.stem if args.text_file else "input_text"
-        chunk_root = Path("app/cache") / _safe_cache_name(base_name)
+        chunk_root = Path("app/cache") / safe_cache_name(base_name)
     chunk_root.mkdir(parents=True, exist_ok=True)
 
     total = len(chunks)
